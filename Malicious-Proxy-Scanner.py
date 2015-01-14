@@ -1,45 +1,35 @@
 #!/usr/bin/env python2
 
-'''Finds hundreds of elite anonymity (L1) HTTP proxies then tests them all in parallel printing the fastest ones first.
-Checks headers to confirm eliteness, checks if compatible with opening HTTPS sites, and confirms the proxy is working
-through multiple IP checking sites'''
-
-# TO DO:
-# -Add http://free-proxy-list.net/
-# -Add hidemyass
-#from IPython import embed
-
-__author__ = 'Dan McInerney'
-__contact__ = 'danhmcinerney gmail'
+'''Finds hundreds of HTTP proxies by scraping a number of different lists of proxies then tests them all in parallel to check for malicious behavior.'''
 
 from gevent import monkey
 monkey.patch_all()
-
+import difflib
+import hashlib
 import requests
 import ast
 import gevent
-import sys, re, time, os, argparse
-import socket
+import sys, re,
 from BeautifulSoup import BeautifulSoup
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-s', '--show', help='Show this number of results. Example: "-s 5" will show the 5 fastest proxies then stop')
-    parser.add_argument('-a', '--all', help='Show all proxy results including the ones that failed 1 of the 3 tests', action='store_true')
-    parser.add_argument('-q', '--quiet', help='Only print the IP:port of the fastest proxies that pass all the tests', action='store_true')
-    return parser.parse_args()
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
 class find_http_proxy():
     ''' Will only gather L1 (elite anonymity) proxies
     which should not give out your IP or advertise
     that you are using a proxy at all '''
 
-    def __init__(self, args):
+    def __init__(self):
         self.proxy_list = []
         self.headers = {'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/33.0.1750.154 Safari/537.36'}
-        self.show_num = args.show
-        self.show_all = args.all
-        self.quiet = args.quiet
         self.errors = []
         self.print_counter = 0
         self.externalip = self.external_ip()
@@ -53,21 +43,17 @@ class find_http_proxy():
         ''' Gets raw high anonymity (L1) proxy data then calls make_proxy_list()
         Currently parses data from gatherproxy.com and letushide.com '''
 
-        if not self.quiet:
-            print '[*] Your accurate external IP: %s' % self.externalip
+        print '[*] Your accurate external IP: %s' % self.externalip
 
         letushide_list = self.letushide_req()
-        if not self.quiet:
-            print '[*] letushide.com: %s proxies' % str(len(letushide_list))
+        print '[*] letushide.com: %s proxies' % str(len(letushide_list))
 
          # Has a login now :(
         gatherproxy_list = self.gatherproxy_req()
-        if not self.quiet:
-            print '[*] gatherproxy.com: %s proxies' % str(len(gatherproxy_list))
+        print '[*] gatherproxy.com: %s proxies' % str(len(gatherproxy_list))
 
         checkerproxy_list = self.checkerproxy_req()
-        if not self.quiet:
-            print '[*] checkerproxy.net: %s proxies' % str(len(checkerproxy_list))
+        print '[*] checkerproxy.net: %s proxies' % str(len(checkerproxy_list))
 
         self.proxy_list.append(letushide_list)
         self.proxy_list.append(gatherproxy_list)
@@ -77,12 +63,7 @@ class find_http_proxy():
         self.proxy_list = [ips for proxy_site in self.proxy_list for ips in proxy_site]
         self.proxy_list = list(set(self.proxy_list)) # Remove duplicates
 
-        if not self.quiet:
-            print '[*] %d unique high anonymity proxies found' % len(self.proxy_list)
-            print '[*] Testing proxy speeds ...'
-            print ''
-            print '      Proxy           | CC  |       Domain          | Time/Errors'
-
+        print '[*] %d unique high anonymity proxies found' % len(self.proxy_list)
         self.proxy_checker()
 
     def checkerproxy_req(self):
@@ -118,9 +99,7 @@ class find_http_proxy():
                             ip_port = ip_port_re.group()
                         if not ip_port:
                             ip_found = False
-                    if 'Elite' in td.text:
-                        elite = True
-                    if ip_found == True and elite == True:
+                    if ip_found == True:
                         ips.append(str(ip_port))
                         break
         return ips
@@ -202,7 +181,6 @@ class find_http_proxy():
 
     def proxy_checker_req(self, proxy):
         ''' See how long each proxy takes to open each URL '''
-        proxyip = str(proxy.split(':', 1)[0])
 
         # A lot of proxy checker sites give a different final octet for some reason
         #proxy_split = proxyip.split('.')
@@ -212,106 +190,34 @@ class find_http_proxy():
         urls = ['http://danmcinerney.org/ip.php', 'http://myip.dnsdynamic.org', 'https://www.astrill.com/what-is-my-ip-address.php', 'http://danmcinerney.org/headers.php']
         for url in urls:
             try:
-                check = requests.get(url,
-                                    headers = self.headers,
-                                    proxies = {'http':'http://'+proxy,
-                                               'https':'http://'+proxy},
-                                    timeout = 15)
-
-                time_or_error = str(check.elapsed)
-                html = check.text
-                time_or_error = self.html_handler(time_or_error, html, url)
                 url = self.url_shortener(url)
-                results.append((time_or_error, proxy, url))
+                results.append(("Passed: elite proxy", proxy, url))
 
             except Exception as e:
                 time_or_error = self.error_handler(str(e))
                 url = self.url_shortener(url)
                 results.append((time_or_error, proxy, url))
 
-        self.print_handler(results, proxyip)
+        self.printerMalicious(results)
 
-    def html_handler(self, time_or_error, html, url):
-        ''' Check the html for errors and if none are found return time to load page '''
-
-        html_lines = html.splitlines()
-        leng = len(html_lines)
-        ipre = '(?:[0-9]{1,3}\.){3}[0-9]{1,3}'
-
-        # Both of these urls just return the ip and nothing else
-        if url in ['http://danmcinerney.org/ip.php', 'http://myip.dnsdynamic.org']:
-            if leng == 1:  # Should return 1 line of html
-                match = re.match(ipre, html)
-                if match:
-                    if self.externalip in html:
-                        time_or_error = 'Err: Page loaded; proxy failed'
-                else:
-                    time_or_error = 'Err: Page loaded; proxy failed'
-            else:
-                time_or_error = 'Err: Page loaded; proxy failed'
-            return time_or_error
-
-        # This is the SSL page
-        if 'astrill' in url:
-            soup = BeautifulSoup(html)
-            ip = soup.find("td", { "colspan": 2 }).text # the ip is the only on with colspan = 2
-            match = re.match(ipre, ip)
-            if match:
-                if self.externalip in ip:
-                    time_or_error = 'Err: Page loaded; proxy failed'
-            else:
-                time_or_error = 'Err: Page loaded; proxy failed'
-            return time_or_error
-
-        if '/headers' in url:
-            # check for proxy headers
-            proxy_headers = ['via: ', 'forwarded: ', 'x-forwarded-for', 'client-ip']
-            if leng > 15: # 15 is arbitrary, I just don't think you'll ever see more than 15 headers
-                time_or_error = 'Err: headers not returned'
-                return time_or_error
-            for l in html_lines:
-                for h in proxy_headers:
-                    if h in l.lower():
-                        time_or_error = 'Err: Proxy headers found'
-                        return time_or_error
-            time_or_error = 'Passed: elite proxy'
-            return time_or_error
-
-    def print_handler(self, results, proxyip):
-        if self.show_all:
-            country_code = self.get_country_code(proxyip)
-            self.printer(results, country_code)
-            self.print_counter += 1
-        else:
-            passed_all = self.passed_all_tests(results)
-            if passed_all:
-                country_code = self.get_country_code(proxyip)
-                self.printer(results, country_code)
-                self.print_counter += 1
-
-        if self.show_num:
-            self.limiter()
-
-    def printer(self, results, country_code):
-        ''' Creates the output '''
-        counter = 0
-        if not self.quiet:
-            print '--------------------------------------------------------------------'
-        for r in results:
-            counter += 1
-            time_or_error = r[0]
-            proxy = r[1]
-            url = r[2]
-
-            if self.quiet:
-                if counter % 4 == 0: #################### THIS results is a list of 4 tuples each, so proxies will repeat 4 times
-                    print proxy
-            else:
-                # Only print the proxy once, on the second print job
-                if counter == 1:
-                    print '%s | %s | %s | %s' % (proxy.ljust(21), country_code.ljust(3), url.ljust(21), time_or_error)
-                else:
-                    print '%s | %s | %s | %s' % (' '.ljust(21), '   ', url.ljust(21), time_or_error)
+    def printerMalicious(self, results):
+        differ = difflib.Differ()
+        for result in results:
+            proxy = result[1]
+            try:
+                html = requests.get("http://www.daviddworken.com/", proxies = {'http':'http://'+proxy}, headers = {'User-agent': 'Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/40.0.2214.69 Safari/537.36'})
+                htmlNormal = requests.get("http://www.daviddworken.com/")
+                htmlHash = hashlib.sha1(html.content).digest()
+                htmlNormalHash = hashlib.sha1(htmlNormal.content).digest()
+                if(not(htmlHash == htmlNormalHash)):
+                    htmlNormalL = htmlNormal.content.splitlines()
+                    htmlL = html.content.splitlines()
+                    diff = differ.compare(htmlNormalL, htmlL)
+                    print(bcolors.WARNING + "[-] Malicious proxy found at " + proxy + bcolors.ENDC)
+                    diffOut =  '\n'.join(diff)
+                    print(diffOut)
+            except:
+                pass
 
     def get_country_code(self, proxyip):
         ''' Get the 3 letter country code of the proxy using geoiptool.com
@@ -367,10 +273,6 @@ class find_http_proxy():
                 return False
         return True
 
-    def limiter(self):
-        ''' Kill the script if user supplied limit of successful proxy attempts (-s argument) is reached '''
-        if self.print_counter >= int(self.show_num):
-            sys.exit()
 
-P = find_http_proxy(parse_args())
+P = find_http_proxy()
 P.run()
