@@ -1,4 +1,7 @@
 #!/bin/python
+#This program will automatically go through a file called 'output.txt' searching for injected javascript code. 
+#For any injected javascript code, it will print out the line containing injected javascript and IP address and
+#port for the proxy that injected said javascript. 
 malicious = []
 ip = []
 with open('output.txt') as f:
