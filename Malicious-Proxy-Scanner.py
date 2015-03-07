@@ -1,4 +1,5 @@
 #!/usr/bin/env python2
+#See output.txt for an example output file
 
 '''Finds hundreds of HTTP proxies by scraping a number of different lists of proxies then tests them all in parallel to check for malicious behavior.'''
 
